@@ -1,4 +1,4 @@
-name: Build LG V30 Kernel (USB 3.0 Enhanced)
+name: Build LG V30 Kernel (SuperSpeed Force Unlock)
 
 on:
   workflow_dispatch:
@@ -19,21 +19,28 @@ jobs:
           sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev \
           clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libncurses5
 
-      - name: Hardcore Patch (USB 3.0 & Fixes)
+      - name: Extreme Patch (USB 3.0 & Fixes)
         run: |
-          echo "---- 1. 修复 tspdrv 源码 Bug ----"
+          # 1. 基础修复 (tspdrv)
           sed -i 's/<sys\/ioctl.h>/<linux\/ioctl.h>/g' include/uapi/linux/tspdrv.h
 
-          echo "---- 2. 强制解锁设备树 USB 3.0 速度 ----"
-          # 寻找所有相关的设备树文件，强制修改速度参数
-          find arch/arm64/boot/dts/lge -name "*.dts*" | xargs sed -i 's/qcom,dwc-usb3-msm-speed = <1>/qcom,dwc-usb3-msm-speed = <2>/g'
-          find arch/arm64/boot/dts/lge -name "*.dts*" | xargs sed -i 's/maximum-speed = "high-speed"/maximum-speed = "super-speed"/g'
+          # 2. 全局强制设备树 SuperSpeed (覆盖所有可能引用到的 SOC 配置文件)
+          echo "---- 正在执行全局设备树速度解封 ----"
+          find arch/arm64/boot/dts/ -name "*.dts*" | xargs sed -i 's/qcom,dwc-usb3-msm-speed = <1>/qcom,dwc-usb3-msm-speed = <2>/g'
+          find arch/arm64/boot/dts/ -name "*.dts*" | xargs sed -i 's/maximum-speed = "high-speed"/maximum-speed = "super-speed"/g'
+          find arch/arm64/boot/dts/ -name "*.dts*" | xargs sed -i 's/maximum-speed = "full-speed"/maximum-speed = "super-speed"/g'
 
-          echo "---- 3. 修改驱动内核源码：禁止降速 ----"
-          # 强制将 DWC3 驱动的最大速度硬编码为 SuperSpeed
-          if [ -f drivers/usb/dwc3/core.c ]; then
-            sed -i 's/dwc->maximum_speed = USB_SPEED_HIGH/dwc->maximum_speed = USB_SPEED_SUPER/g' drivers/usb/dwc3/core.c
-            sed -i 's/maximum_speed = USB_SPEED_HIGH/maximum_speed = USB_SPEED_SUPER/g' drivers/usb/dwc3/core.c
+          # 3. 驱动源码手术：强杀 DWC3 降级逻辑
+          echo "---- 正在修改 DWC3 核心驱动逻辑 ----"
+          # 强制将所有速度赋值点锁定为 SUPER
+          find drivers/usb/dwc3 -name "*.c" | xargs sed -i 's/USB_SPEED_HIGH/USB_SPEED_SUPER/g'
+          find drivers/usb/dwc3 -name "*.c" | xargs sed -i 's/USB_SPEED_FULL/USB_SPEED_SUPER/g'
+          
+          # 4. 针对 msm8998 特有的驱动包装层 (dwc3-msm.c)
+          # 很多时候是这个包装层根据 extcon (连接器检测) 把速度压下去的
+          if [ -f drivers/usb/dwc3/dwc3-msm.c ]; then
+            echo "---- 正在解锁 dwc3-msm 包装层限速 ----"
+            sed -i 's/USB_SPEED_HIGH/USB_SPEED_SUPER/g' drivers/usb/dwc3/dwc3-msm.c
           fi
 
       - name: Build Kernel
@@ -59,25 +66,21 @@ jobs:
             HOSTCXX=g++
           "
 
-          echo "---- 生成配置并追加网卡/3.0参数 ----"
           make $MAKE_ARGS lineageos_joan_defconfig
           
-          # 追加配置确保 3.0 控制器和 RTL 网卡全部以内置模式运行
+          # 强制开启高通 USB3 所有的物理层和控制器配置
           {
             echo "CONFIG_USB_RTL8152=y"
-            echo "CONFIG_USB_USBNET=y"
             echo "CONFIG_USB_DWC3_MSM=y"
-            echo "CONFIG_USB_DWC3_PCI=n"
-            echo "CONFIG_USB_AUTOSUSPEND_ON_AC=n" # 禁用自动休眠以提高稳定性
+            echo "CONFIG_USB_MSM_SSPHY_QMP=y"
+            echo "CONFIG_USB_GADGET_VBUS_DRAW=900" # 关键：将允许的电流提升到 3.0 标准的 900mA
           } >> out/.config
 
           make $MAKE_ARGS olddefconfig
-
-          echo "---- 正在开始全力编译 ----"
           make -j$(nproc --all) $MAKE_ARGS
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LG-V30-Kernel-SuperSpeed
+          name: LG-V30-Kernel-SuperForce
           path: out/arch/arm64/boot/Image.gz-dtb
