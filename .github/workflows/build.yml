@@ -15,19 +15,24 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev libncurses5
 
-      - name: Get Optimized Toolchain
+      - name: Get Reliable Toolchain
         run: |
-          # 使用已经打包好的 Eva-GCC 和 AOSP Clang，专门针对内核编译优化
+          # 使用 GitHub 上的高可用镜像，规避权限问题
           git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 toolchain64
           git clone --depth=1 https://github.com/mvaisakh/gcc-arm toolchain32
-          # 下载官方 Clang 的稳定精简版
-          git clone --depth=1 https://gitlab.com/LeCmnGend/clang-standalone toolchain-clang
+          # 换成这个 GitHub 上的 AOSP Clang 镜像，不需要登录，下载极快
+          git clone --depth=1 https://github.com/ZyCromerZ/Clang toolchain-clang
 
       - name: Start Building
         run: |
-          # 这样设置路径绝对不会出错
+          # 1. 暴力赋予所有工具执行权限，防止 Permission denied
+          chmod -R +x toolchain64/bin/
+          chmod -R +x toolchain32/bin/
+          chmod -R +x toolchain-clang/bin/
+          
+          # 2. 导出绝对路径
           CLANG_BIN=$(pwd)/toolchain-clang/bin
           GCC64_BIN=$(pwd)/toolchain64/bin
           GCC32_BIN=$(pwd)/toolchain32/bin
@@ -35,7 +40,7 @@ jobs:
           export PATH="$CLANG_BIN:$GCC64_BIN:$GCC32_BIN:$PATH"
           export ARCH=arm64
           
-          # 修正编译参数
+          # 3. 核心参数：针对 msm8998 的标准 Clang 编译配置
           MAKE_ARGS="
             O=out \
             ARCH=arm64 \
@@ -48,14 +53,14 @@ jobs:
             NM=llvm-nm \
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip
+            STRIP=llvm-strip \
+            HOSTCC=gcc \
+            HOSTCXX=g++
           "
 
-          # 1. 配置
+          # 4. 配置并编译
           make $MAKE_ARGS lineageos_joan_defconfig
-          
-          # 2. 编译
-          make -j$(nproc) $MAKE_ARGS
+          make -j$(nproc --all) $MAKE_ARGS
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
