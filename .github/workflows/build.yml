@@ -1,16 +1,16 @@
 name: Build V30 Kernel
 
 on:
-  workflow_dispatch: # 核心：允许手动点火
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # 升级到 v4
         with:
-          ref: lineage-20 # 显式告诉它：拉取 lineage-20 分支的代码
+          ref: lineage-20
 
       - name: Setup Environment
         run: |
@@ -29,7 +29,7 @@ jobs:
           make -j$(nproc) O=out
 
       - name: Upload Result
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4 # 升级到 v4
         with:
-          name: V30-Kernel-Image
+          name: LG-V30-Kernel-Result
           path: out/arch/arm64/boot/Image.gz-dtb
