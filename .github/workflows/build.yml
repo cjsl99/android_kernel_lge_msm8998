@@ -5,6 +5,7 @@ on:
 
 jobs:
   build:
+    # 强制使用 22.04，这是目前内核编译最稳定的环境
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Source
@@ -12,58 +13,50 @@ jobs:
         with:
           ref: lineage-20
 
-      - name: Setup Environment
+      - name: Setup & Build
         run: |
+          # 1. 安装所有必需的依赖和交叉编译器 (gcc-aarch64 是最稳的后备)
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev libncurses5
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev \
+          clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libncurses5
 
-      - name: Get Reliable Toolchain
-        run: |
-          # 使用 GitHub 上的高可用镜像，规避权限问题
-          git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 toolchain64
-          git clone --depth=1 https://github.com/mvaisakh/gcc-arm toolchain32
-          # 换成这个 GitHub 上的 AOSP Clang 镜像，不需要登录，下载极快
-          git clone --depth=1 https://github.com/ZyCromerZ/Clang toolchain-clang
+          # 2. 准备输出目录
+          mkdir -p out
 
-      - name: Start Building
-        run: |
-          # 1. 暴力赋予所有工具执行权限，防止 Permission denied
-          chmod -R +x toolchain64/bin/
-          chmod -R +x toolchain32/bin/
-          chmod -R +x toolchain-clang/bin/
-          
-          # 2. 导出绝对路径
-          CLANG_BIN=$(pwd)/toolchain-clang/bin
-          GCC64_BIN=$(pwd)/toolchain64/bin
-          GCC32_BIN=$(pwd)/toolchain32/bin
-          
-          export PATH="$CLANG_BIN:$GCC64_BIN:$GCC32_BIN:$PATH"
+          # 3. 设置变量 (直接指向系统路径，再也不怕找不到文件夹)
           export ARCH=arm64
+          export SUBARCH=arm64
           
-          # 3. 核心参数：针对 msm8998 的标准 Clang 编译配置
+          # 定义编译参数 - 针对 LineageOS 20 的 msm8998 标准配置
+          # 我们使用系统自带的 Clang，它在 22.04 下非常稳定
           MAKE_ARGS="
             O=out \
             ARCH=arm64 \
             CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-none-elf- \
-            CROSS_COMPILE_ARM32=arm-none-eabi- \
             LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=gcc \
             HOSTCXX=g++
           "
 
-          # 4. 配置并编译
+          # 4. 开始执行
+          echo "---- 正在生成配置文件 ----"
           make $MAKE_ARGS lineageos_joan_defconfig
-          make -j$(nproc --all) $MAKE_ARGS
 
-      - name: Upload Result
+          echo "---- 正在开始编译 ----"
+          # 使用 nproc 动态获取核心数，全速编译
+          make -j$(nproc) $MAKE_ARGS
+
+      - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
-          name: LG-V30-Kernel-Result
+          name: LG-V30-Kernel
+          # 如果编译成功，Image.gz-dtb 会在这个位置
           path: out/arch/arm64/boot/Image.gz-dtb
