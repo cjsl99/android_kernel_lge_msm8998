@@ -15,23 +15,41 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt update
+          # 增加 libssl-dev 等必要依赖
           sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
 
-      - name: Get Toolchain # 换成了现代化的 Proton Clang 聚合工具链
+      - name: Get Toolchain
         run: |
+          # 下载目前最兼容的 Proton Clang
           git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
 
       - name: Start Building
         run: |
-          export ARCH=arm64
-          # 把新工具链添加到系统环境变量里
-          export PATH=$(pwd)/toolchain/bin:$PATH
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          # 定义工具链路径，但不要 export 到全局 PATH
+          TC_DIR=$(pwd)/toolchain/bin
           
-          # CC=clang 是核心：强制使用现代化的 Clang 编译器来做饭
-          make O=out lineageos_joan_defconfig CC=clang
-          make -j$(nproc) O=out CC=clang
+          export ARCH=arm64
+          # 只要把这几个核心变量传给 make 就行
+          MAKE_ARGS="
+            O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip
+          "
+
+          # 1. 配置内核
+          make $MAKE_ARGS PATH="$TC_DIR:$PATH" lineageos_joan_defconfig
+          
+          # 2. 正式编译
+          make -j$(nproc) $MAKE_ARGS PATH="$TC_DIR:$PATH"
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
