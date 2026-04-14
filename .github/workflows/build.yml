@@ -1,34 +1,41 @@
-name: Build V30 Kernel
+name: Build LG V30 Kernel
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    # 强制使用 22.04，这是目前内核编译最稳定的环境
+    # 使用 22.04 环境，避开新版系统的库冲突
     runs-on: ubuntu-22.04
+    
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
           ref: lineage-20
 
-      - name: Setup & Build
+      - name: Setup Environment
         run: |
-          # 1. 安装所有必需的依赖和交叉编译器 (gcc-aarch64 是最稳的后备)
           sudo apt update
           sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev \
           clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libncurses5
 
-          # 2. 准备输出目录
-          mkdir -p out
+      - name: Patch Source Code
+        run: |
+          echo "---- 正在修复 tspdrv 源码 Bug ----"
+          # 核心修复：把错误的 sys/ 路径改为内核标准的 linux/ 路径
+          sed -i 's/<sys\/ioctl.h>/<linux\/ioctl.h>/g' include/uapi/linux/tspdrv.h
 
-          # 3. 设置变量 (直接指向系统路径，再也不怕找不到文件夹)
+      - name: Build Kernel
+        run: |
+          # 准备输出目录
+          mkdir -p out
+          
+          # 设置环境变量
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # 定义编译参数 - 针对 LineageOS 20 的 msm8998 标准配置
-          # 我们使用系统自带的 Clang，它在 22.04 下非常稳定
+          # 定义编译参数
           MAKE_ARGS="
             O=out \
             ARCH=arm64 \
@@ -46,17 +53,15 @@ jobs:
             HOSTCXX=g++
           "
 
-          # 4. 开始执行
           echo "---- 正在生成配置文件 ----"
           make $MAKE_ARGS lineageos_joan_defconfig
 
-          echo "---- 正在开始编译 ----"
-          # 使用 nproc 动态获取核心数，全速编译
-          make -j$(nproc) $MAKE_ARGS
+          echo "---- 正在开始全力编译 ----"
+          make -j$(nproc --all) $MAKE_ARGS
 
-      - name: Upload Kernel
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LG-V30-Kernel
-          # 如果编译成功，Image.gz-dtb 会在这个位置
+          name: LG-V30-Kernel-Image
+          # 编译成功后的内核镜像路径
           path: out/arch/arm64/boot/Image.gz-dtb
