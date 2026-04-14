@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 降级到更稳定的 22.04 环境，避免 24.04 的 libc 冲突
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -17,31 +17,32 @@ jobs:
           sudo apt update
           sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev
 
-      - name: Get Official Toolchain
+      - name: Get Optimized Toolchain
         run: |
-          # 下载 LineageOS 官方使用的预编译 Clang (14.0.6左右，最稳)
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain-clang
-          # 下载官方交叉编译工具
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 toolchain64
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 toolchain32
+          # 使用已经打包好的 Eva-GCC 和 AOSP Clang，专门针对内核编译优化
+          git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 toolchain64
+          git clone --depth=1 https://github.com/mvaisakh/gcc-arm toolchain32
+          # 下载官方 Clang 的稳定精简版
+          git clone --depth=1 https://gitlab.com/LeCmnGend/clang-standalone toolchain-clang
 
       - name: Start Building
         run: |
-          # 动态查找 Clang 具体的 bin 目录（官方仓路径较深）
-          CLANG_BIN=$(find $(pwd)/toolchain-clang -name "clang" | head -n 1 | xargs dirname)
+          # 这样设置路径绝对不会出错
+          CLANG_BIN=$(pwd)/toolchain-clang/bin
           GCC64_BIN=$(pwd)/toolchain64/bin
           GCC32_BIN=$(pwd)/toolchain32/bin
           
-          export ARCH=arm64
           export PATH="$CLANG_BIN:$GCC64_BIN:$GCC32_BIN:$PATH"
-
+          export ARCH=arm64
+          
+          # 修正编译参数
           MAKE_ARGS="
             O=out \
             ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            CROSS_COMPILE=aarch64-none-elf- \
+            CROSS_COMPILE_ARM32=arm-none-eabi- \
             LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -50,10 +51,10 @@ jobs:
             STRIP=llvm-strip
           "
 
-          # 1. 净化环境并配置
+          # 1. 配置
           make $MAKE_ARGS lineageos_joan_defconfig
           
-          # 2. 正式开始（使用全部 CPU 核心）
+          # 2. 编译
           make -j$(nproc) $MAKE_ARGS
 
       - name: Upload Result
