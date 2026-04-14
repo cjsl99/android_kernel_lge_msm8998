@@ -17,21 +17,21 @@ jobs:
           sudo apt update
           sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
 
-      - name: Get Toolchains # 重点修改：同时下载64位和32位工具链
+      - name: Get Toolchain # 换成了现代化的 Proton Clang 聚合工具链
         run: |
-          # 这是原来的 64位 刀
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 toolchain
-          # 这是新增的 32位 刀
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 toolchain32
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
 
-      - name: Start Building # 重点修改：告诉系统32位刀在哪里
+      - name: Start Building
         run: |
           export ARCH=arm64
-          export CROSS_COMPILE=$(pwd)/toolchain/bin/aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=$(pwd)/toolchain32/bin/arm-linux-androideabi-
+          # 把新工具链添加到系统环境变量里
+          export PATH=$(pwd)/toolchain/bin:$PATH
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          make O=out lineageos_joan_defconfig
-          make -j$(nproc) O=out
+          # CC=clang 是核心：强制使用现代化的 Clang 编译器来做饭
+          make O=out lineageos_joan_defconfig CC=clang
+          make -j$(nproc) O=out CC=clang
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
