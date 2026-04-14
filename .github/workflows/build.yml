@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # 降级到更稳定的 22.04 环境，避免 24.04 的 libc 冲突
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -15,28 +15,33 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt update
-          # 增加 libssl-dev 等必要依赖
-          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev
 
-      - name: Get Toolchain
+      - name: Get Official Toolchain
         run: |
-          # 下载目前最兼容的 Proton Clang
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
+          # 下载 LineageOS 官方使用的预编译 Clang (14.0.6左右，最稳)
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain-clang
+          # 下载官方交叉编译工具
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 toolchain64
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 toolchain32
 
       - name: Start Building
         run: |
-          # 定义工具链路径，但不要 export 到全局 PATH
-          TC_DIR=$(pwd)/toolchain/bin
+          # 动态查找 Clang 具体的 bin 目录（官方仓路径较深）
+          CLANG_BIN=$(find $(pwd)/toolchain-clang -name "clang" | head -n 1 | xargs dirname)
+          GCC64_BIN=$(pwd)/toolchain64/bin
+          GCC32_BIN=$(pwd)/toolchain32/bin
           
           export ARCH=arm64
-          # 只要把这几个核心变量传给 make 就行
+          export PATH="$CLANG_BIN:$GCC64_BIN:$GCC32_BIN:$PATH"
+
           MAKE_ARGS="
             O=out \
             ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -45,11 +50,11 @@ jobs:
             STRIP=llvm-strip
           "
 
-          # 1. 配置内核
-          make $MAKE_ARGS PATH="$TC_DIR:$PATH" lineageos_joan_defconfig
+          # 1. 净化环境并配置
+          make $MAKE_ARGS lineageos_joan_defconfig
           
-          # 2. 正式编译
-          make -j$(nproc) $MAKE_ARGS PATH="$TC_DIR:$PATH"
+          # 2. 正式开始（使用全部 CPU 核心）
+          make -j$(nproc) $MAKE_ARGS
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
